@@ -63,7 +63,9 @@ class AttentionModel(nn.Module):
         self.allow_partial = problem.NAME == 'sdvrp'
         self.is_vrp = problem.NAME == 'cvrp' or problem.NAME == 'sdvrp'
         self.is_orienteering = problem.NAME == 'op'
+        self.is_orienteering_3d = problem.NAME == 'op_3d'
         self.is_pctsp = problem.NAME == 'pctsp'
+        self.is_pctsp_3d = problem.NAME == 'pctsp_3d'
 
         self.tanh_clipping = tanh_clipping
 
@@ -76,18 +78,27 @@ class AttentionModel(nn.Module):
         self.shrink_size = shrink_size
 
         # Problem specific context parameters (placeholder and step context dimension)
-        if self.is_vrp or self.is_orienteering or self.is_pctsp:
+        if self.is_vrp or self.is_orienteering or self.is_orienteering_3d or self.is_pctsp or self.is_pctsp_3d:
             # Embedding of last node + remaining_capacity / remaining length / remaining prize to collect
             step_context_dim = embedding_dim + 1
 
-            if self.is_pctsp:
-                node_dim = 4  # x, y, expected_prize, penalty
+            if self.is_pctsp_3d:
+                node_dim = 5  # x, y, z, expected_prize, penalty
+                # Special embedding projection for depot node
+                self.init_embed_depot = nn.Linear(3, embedding_dim)
+            elif self.is_orienteering_3d:
+                node_dim = 4  # x, y, z, demand / prize
+                # Special embedding projection for depot node
+                self.init_embed_depot = nn.Linear(3, embedding_dim)
             else:
-                node_dim = 3  # x, y, demand / prize
+                if self.is_pctsp:
+                    node_dim = 4  # x, y, expected_prize, penalty
+                else:
+                    node_dim = 3  # x, y, demand / prize
 
-            # Special embedding projection for depot node
-            self.init_embed_depot = nn.Linear(2, embedding_dim)
-            
+                # Special embedding projection for depot node
+                self.init_embed_depot = nn.Linear(2, embedding_dim)
+
             if self.is_vrp and self.allow_partial:  # Need to include the demand if split delivery allowed
                 self.project_node_step = nn.Linear(1, 3 * embedding_dim, bias=False)
         else:  # TSP
@@ -200,13 +211,13 @@ class AttentionModel(nn.Module):
 
     def _init_embed(self, input):
 
-        if self.is_vrp or self.is_orienteering or self.is_pctsp:
+        if self.is_vrp or self.is_orienteering or self.is_orienteering_3d or self.is_pctsp or self.is_pctsp_3d:
             if self.is_vrp:
                 features = ('demand', )
-            elif self.is_orienteering:
+            elif self.is_orienteering or self.is_orienteering_3d:
                 features = ('prize', )
             else:
-                assert self.is_pctsp
+                assert self.is_pctsp or self.is_pctsp_3d
                 features = ('deterministic_prize', 'penalty')
             return torch.cat(
                 (
@@ -367,7 +378,7 @@ class AttentionModel(nn.Module):
     def _get_parallel_step_context(self, embeddings, state, from_depot=False):
         """
         Returns the context per step, optionally for multiple steps at once (for efficient evaluation of the model)
-        
+
         :param embeddings: (batch_size, graph_size, embed_dim)
         :param prev_a: (batch_size, num_steps)
         :param first_a: Only used when num_steps = 1, action of first step or None if first step
@@ -404,7 +415,7 @@ class AttentionModel(nn.Module):
                     ),
                     -1
                 )
-        elif self.is_orienteering or self.is_pctsp:
+        elif self.is_orienteering or self.is_orienteering_3d or self.is_pctsp or self.is_pctsp_3d:
             return torch.cat(
                 (
                     torch.gather(
@@ -416,7 +427,7 @@ class AttentionModel(nn.Module):
                     ).view(batch_size, num_steps, embeddings.size(-1)),
                     (
                         state.get_remaining_length()[:, :, None]
-                        if self.is_orienteering
+                        if (self.is_orienteering or self.is_orienteering_3d)
                         else state.get_remaining_prize_to_collect()[:, :, None]
                     )
                 ),
