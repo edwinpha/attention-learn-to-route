@@ -231,7 +231,7 @@ if __name__ == "__main__":
                 elif problem == "op":
                     dataset = generate_op_data(opts.dataset_size, graph_size, prize_type=distribution)
                 elif problem == "op_3d":
-                    dataset = generate_op_data(opts.dataset_size, graph_size, prize_type=distribution)
+                    dataset = generate_op_3d_data(opts.dataset_size, graph_size, prize_type=distribution)
                 else:
                     assert False, "Unknown problem: {}".format(problem)
 
